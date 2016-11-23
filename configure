@@ -585,7 +585,7 @@ PACKAGE_STRING='cwchessboard 2.0.9'
 PACKAGE_BUGREPORT='carlo@alinoe.com'
 PACKAGE_URL=''
 
-ac_unique_file="CwChessboard.h"
+ac_unique_file="src/CwChessboard.h"
 ac_subst_vars='am__EXEEXT_FALSE
 am__EXEEXT_TRUE
 LTLIBOBJS
@@ -2101,7 +2101,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
-ac_config_headers="$ac_config_headers config.h"
+ac_config_headers="$ac_config_headers src/config.h"
 
 
 
@@ -5423,7 +5423,7 @@ else
 fi
 
 
-ac_config_files="$ac_config_files ./timestamp-sys.h:./sys.h.in"
+ac_config_files="$ac_config_files src/timestamp-sys.h:src/sys.h.in"
 
 
 
@@ -5443,7 +5443,7 @@ CXXCPP_FINGER_PRINT="$cw_prog_cxxcpp_finger_print"
 CXXFLAGS_FINGER_PRINT=$(echo $CXXFLAGS | sed -e 's/-W[a-z-]* *//g')
 
 
-ac_config_files="$ac_config_files Makefile"
+ac_config_files="$ac_config_files Makefile src/Makefile"
 
 
 cat >confcache <<\_ACEOF
@@ -6187,10 +6187,11 @@ cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
 for ac_config_target in $ac_config_targets
 do
   case $ac_config_target in
-    "config.h") CONFIG_HEADERS="$CONFIG_HEADERS config.h" ;;
+    "src/config.h") CONFIG_HEADERS="$CONFIG_HEADERS src/config.h" ;;
     "depfiles") CONFIG_COMMANDS="$CONFIG_COMMANDS depfiles" ;;
-    "./timestamp-sys.h") CONFIG_FILES="$CONFIG_FILES ./timestamp-sys.h:./sys.h.in" ;;
+    "src/timestamp-sys.h") CONFIG_FILES="$CONFIG_FILES src/timestamp-sys.h:src/sys.h.in" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
+    "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
@@ -6879,14 +6880,14 @@ $as_echo X"$file" |
   done
 }
  ;;
-    "./timestamp-sys.h":F)
-if cmp -s ./sys.h ./timestamp-sys.h 2> /dev/null; then
+    "src/timestamp-sys.h":F)
+if cmp -s src/sys.h src/timestamp-sys.h 2> /dev/null; then
   echo "config.status: sys.h is unchanged"
 else
   echo "config.status: creating sys.h"
-  cp ./timestamp-sys.h ./sys.h
+  cp src/timestamp-sys.h src/sys.h
 fi
-touch ./timestamp-sys.h
+touch src/timestamp-sys.h
  ;;
 
   esac

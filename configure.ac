@@ -9,11 +9,11 @@ dnl Package name and version
 AC_INIT(CW_PACKAGE_NAME, CW_VERSION_MAJOR.CW_VERSION_MINOR.CW_VERSION_REVISION, CW_BUGREPORT)
 
 dnl Put resulting configuration defines in this header file.
-AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_HEADERS([src/config.h])
 
 dnl Ensure that the directory specified with --srcdir was correct
 dnl by demanding that it contains `CwChessboard.h'.
-AC_CONFIG_SRCDIR([CwChessboard.h])
+AC_CONFIG_SRCDIR([src/CwChessboard.h])
 
 dnl Because we use cwautomacros.
 CW_AUTOMACROS([20081012])
@@ -93,6 +93,7 @@ AC_SUBST([CXXFLAGS_FINGER_PRINT])
 
 dnl Output the other configuration files.
 AC_CONFIG_FILES(
+	[Makefile]
 	[src/Makefile]
 	)
 
