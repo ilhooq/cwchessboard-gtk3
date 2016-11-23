@@ -76,7 +76,7 @@ dnl Check for libraries.
 CW_LIB_LIBGTK2
 
 dnl Generate sys.h.
-CW_CONFIG_FILE([.], [sys.h])
+CW_CONFIG_FILE([src], [sys.h])
 
 dnl Used in sys.h to force recompilation when the compiler version changes.
 CW_PROG_CXX_FINGER_PRINTS
@@ -93,7 +93,7 @@ AC_SUBST([CXXFLAGS_FINGER_PRINT])
 
 dnl Output the other configuration files.
 AC_CONFIG_FILES(
-	[Makefile]
+	[src/Makefile]
 	)
 
 AC_OUTPUT
