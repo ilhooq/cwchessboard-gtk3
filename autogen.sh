@@ -32,7 +32,10 @@ PREFIX=${CWAUTOMACROSPREFIX-/usr}
 
 if test ! -f $PREFIX/share/cwautomacros/scripts/autogen.sh; then
   echo "$0: $PREFIX/share/cwautomacros/scripts/autogen.sh: No such file or directory"
-  echo "$0: This project needs 'cwautomacros'. See http://cwautomacros.berlios.de/"
+  echo "$0: Try to download "
+  git clone https://github.com/CarloWood/cwautomacros.git
+  cd cwautomacros
+  make install
   exit 126
 fi
 

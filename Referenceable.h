@@ -25,7 +25,7 @@
 #define REFERENCEABLE_H
 
 #ifndef USE_PCH
-#include <glib/gatomic.h>
+#include <glib.h>
 #endif
 
 namespace util {
