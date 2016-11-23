@@ -64,9 +64,6 @@ AM_CONDITIONAL(LIBCWD_USED, [test $USE_LIBCWD = yes])
 dnl Checks for other programs.
 AC_PROG_INSTALL
 
-dnl We use doxygen for documentation.
-CW_DOXYGEN
-
 dnl Detect libgtkmm
 PKG_CHECK_MODULES([gtkmm], [gtkmm-2.4 >= 2.8.0])
 
@@ -97,10 +94,6 @@ AC_SUBST([CXXFLAGS_FINGER_PRINT])
 dnl Output the other configuration files.
 AC_CONFIG_FILES(
 	[Makefile]
-	[doc/Makefile]
-	[doc/doxygen.config]
-	[doc/html.header]
-	[doc/html.footer]
 	)
 
 AC_OUTPUT
