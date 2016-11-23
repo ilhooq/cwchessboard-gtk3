@@ -132,15 +132,6 @@ distclean-local:
 	rm -f $(srcdir)/config.h.in~ sys.h
 
 MAINTAINERCLEANFILES = \
-	$(srcdir)/aclocal.m4 \
-	$(srcdir)/configure \
-	$(srcdir)/Makefile.in \
-	$(srcdir)/install-sh \
-	$(srcdir)/missing \
-	$(srcdir)/config.h.in \
-	$(srcdir)/depcomp \
-	$(srcdir)/config.guess \
-	$(srcdir)/config.sub \
-	stamp-h1 \
-	config.status \
-	config.log
+	Makefile.in \
+	config.h.in
+
