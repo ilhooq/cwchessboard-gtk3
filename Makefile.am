@@ -11,9 +11,7 @@ MAINTAINERCLEANFILES = \
 	configure \
 	depcomp \
 	install-sh \
-	missing \
-	src/Makefile.in \
-	src/config.h.in
+	missing
 
 
 

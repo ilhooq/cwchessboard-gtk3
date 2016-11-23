@@ -129,7 +129,7 @@ clean-local:
 	@MAINTAINER_MODE_TRUE@rm -f gdb.cmds troep* *.cgd @PACKAGE@-@VERSION@.tar.gz
 
 distclean-local:
-	rm -f $(srcdir)/config.h.in~ sys.h
+	rm -f sys.h
 
 MAINTAINERCLEANFILES = \
 	Makefile.in \
