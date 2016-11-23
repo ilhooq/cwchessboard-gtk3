@@ -31,7 +31,7 @@
 #include <ctime>		// Needed for clock_gettime.
 #include <iomanip>
 #include "debug.h"
-#include <glib/gmacros.h>
+#include <glib.h>
 #ifdef CWDEBUG
 #include <libcwd/buf2str.h>
 #endif

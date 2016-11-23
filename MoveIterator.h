@@ -32,7 +32,7 @@
 #include "BitBoard.h"
 #include "Piece.h"
 #ifdef GTKMM
-#include <glib/gmacros.h>
+#include <glib.h>
 #endif
 
 #ifndef G_LIKELY

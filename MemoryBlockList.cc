@@ -23,7 +23,7 @@
 
 #ifndef USE_PCH
 #include "sys.h"
-#include <glib/gmacros.h>
+#include <glib.h>
 #endif
 
 #include "MemoryBlockList.h"
