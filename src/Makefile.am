@@ -22,18 +22,27 @@ TSTCPP_SRC = tstcpp.cc $(GUISOURCES)
 TSTCHESSPOSITION_SRC = tstchessposition.cc $(CPPSOURCES)
 # The source code needed for tstbenchmark
 TSTBENCHMARK_SRC = tstbenchmark.cc $(CPPSOURCES)
-
+# The source code needed for tstpgnread
+TSTPGNREAD_SRC = tstpgnread.cc PgnDatabase.cc chattr.tab.cc MemoryBlockList.cc $(CPPSOURCES)
+# The source code needed for tsticonv
+TSTICONV_SRC = tsticonv.cc
+# The source code needed for tstpgn
+TSTPGN_SRC = tstpgn.cc PgnDatabase.cc chattr.tab.cc MemoryBlockList.cc $(CPPSOURCES)
+# The source code needed for tstspirit
+TSTSPIRIT_SRC = tstspirit.cc
 # CppUnit testsuite.
 TESTSUITE_SRC = testsuite.cc $(CPPSOURCES)
 
 if LIBCWD_USED
 CPPSOURCES += debug.cc debug_ostream_operators.cc
+#TSTSPIRIT_SRC += debug.cc
 endif
 if REAL_MAINTAINER
 GUISOURCES += gtk_debug_ostream_operators.cc
 endif
 
-noinst_PROGRAMS = testsuite tstchessposition tstc tstcpp tstbenchmark
+# noinst_PROGRAMS = testsuite tstchessposition tstc tstcpp tstbenchmark tstpgnread tsticonv tstpgn tstspirit
+noinst_PROGRAMS = testsuite tstchessposition tstc tstcpp tstbenchmark tstspirit
 
 tstc_SOURCES = $(TSTC_SRC)
 tstc_CFLAGS = -std=c99 @GTK2_FLAGS@
@@ -55,8 +64,24 @@ tstbenchmark_SOURCES = $(TSTBENCHMARK_SRC)
 tstbenchmark_CXXFLAGS = @CWD_FLAGS@
 tstbenchmark_LDADD = @CWD_LIBS@ -lm
 
+# tstpgnread_SOURCES = $(TSTPGNREAD_SRC)
+# tstpgnread_CXXFLAGS = @CWD_R_FLAGS@ $$(pkg-config --cflags giomm-2.4) $$(pkg-config --cflags gthread-2.0)
+# tstpgnread_LDFLAGS = @CWD_R_LIBS@ -lm $$(pkg-config --libs giomm-2.4) $$(pkg-config --libs gthread-2.0)
+
+# tsticonv_SOURCES = $(TSTICONV_SRC)
+# tsticonv_CXXFLAGS = @CWD_FLAGS@ $$(pkg-config --cflags glibmm-2.4)
+# tsticonv_LDFLAGS = @CWD_LIBS@ -lm $$(pkg-config --libs glibmm-2.4)
+
+# tstpgn_SOURCES = $(TSTPGN_SRC)
+# tstpgn_CXXFLAGS = @CWD_R_FLAGS@ $$(pkg-config --cflags giomm-2.4) $$(pkg-config --cflags gthread-2.0) --param large-function-growth=500
+# tstpgn_LDFLAGS = @CWD_R_LIBS@ -lm $$(pkg-config --libs giomm-2.4) $$(pkg-config --libs gthread-2.0)
+
+tstspirit_SOURCES = $(TSTSPIRIT_SRC)
+tstspirit_CXXFLAGS = @CWD_FLAGS@
+tstspirit_LDADD = @CWD_LIBS@ -lm
+
 if MAINTAINER_MODE
-BUILT_SOURCES = $(srcdir)/gen.cc $(srcdir)/CwChessboard-CONST.h sys.h
+BUILT_SOURCES = $(srcdir)/gen.cc $(srcdir)/CwChessboard-CONST.h $(srcdir)/PgnGrammar.h chattr.tab.cc sys.h
 noinst_PROGRAMS += table_gen
 
 table_gen_SOURCES = table_gen.cc
