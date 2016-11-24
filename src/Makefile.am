@@ -45,8 +45,8 @@ endif
 noinst_PROGRAMS = testsuite tstchessposition tstc tstcpp tstbenchmark tstspirit
 
 tstc_SOURCES = $(TSTC_SRC)
-tstc_CFLAGS = -std=c99 @GTK2_FLAGS@
-tstc_LDADD = @GTK2_LIBS@ -lm
+tstc_CFLAGS = -std=c99 @GTK3_CFLAGS@
+tstc_LDADD = @GTK3_LIBS@ -lm
 
 tstcpp_SOURCES = $(TSTCPP_SRC)
 tstcpp_CXXFLAGS = @CWD_FLAGS@ @gtkmm_CFLAGS@ -DGTKMM -DLIBCWD_THREAD_SAFE=0

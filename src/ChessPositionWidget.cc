@@ -225,7 +225,7 @@ void ChessPositionWidget::on_menu_copy_FEN(void)
 {
   DoutEntering(dc::clipboard, "ChessPositionWidget::on_menu_copy_FEN");
   Glib::RefPtr<Gtk::Clipboard> refClipboard = Gtk::Clipboard::get();
-  std::list<Gtk::TargetEntry> targets;
+  std::vector<Gtk::TargetEntry> targets;
   targets.push_back(Gtk::TargetEntry("UTF8_STRING"));
   Glib::ustring clipboard_store = FEN();
   // Set the content of the clipboard here, because I'm not sure if set() can cause an immediate call to on_clipboard_get.
@@ -347,9 +347,12 @@ void ChessPositionWidget::initialize_menus(void)
     Type type(nothing);
     do
     {
-      Glib::RefPtr<Gdk::Pixmap> icon_pixmap = Gdk::Pixmap::create(M_drawable->get_window(), 16, 16);
-      Cairo::RefPtr<Cairo::Context> cairo_context = icon_pixmap->create_cairo_context();  
-      cairo_t* cr = cairo_context->cobj();
+      // Glib::RefPtr<Gdk::Pixmap> icon_pixmap = Gdk::Pixmap::create(M_drawable->get_window(), 16, 16);
+      // Cairo::RefPtr<Cairo::Context> cairo_context = icon_pixmap->create_cairo_context();  
+      // cairo_t* cr = cairo_context->cobj();
+      
+      cairo_surface_t *s = cairo_image_surface_create (CAIRO_FORMAT_A1, 12, 12);
+      cairo_t* cr = cairo_create(s);
       cairo_set_source_rgb(cr, light_square_color.red / 65535.0, light_square_color.green / 65535.0, light_square_color.blue / 65535.0);
       cairo_paint(cr);
       std::string icon_str(iswhite ? "white_" : "black_");
@@ -384,8 +387,8 @@ void ChessPositionWidget::initialize_menus(void)
           break;
       }
       icon_str += "_icon";
-      Glib::RefPtr<Gdk::Pixbuf> icon_pixbuf = Gdk::Pixbuf::create(Glib::RefPtr<Gdk::Drawable>::cast_static(icon_pixmap), 0, 0, 16, 16);
-      M_refIconFactory->add(Gtk::StockID(icon_str.c_str()), Gtk::IconSet(icon_pixbuf));
+      // Glib::RefPtr<Gdk::Pixbuf> icon_pixbuf = Gdk::Pixbuf::create(Glib::RefPtr<Gdk::Drawable>::cast_static(icon_pixmap), 0, 0, 16, 16);
+      // M_refIconFactory->add(Gtk::StockID(icon_str.c_str()), Gtk::IconSet(icon_pixbuf));
 
       do { TypeData type_data = { type() + 1 }; type = type_data; } while (type() == 4);
     }

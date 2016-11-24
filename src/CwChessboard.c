@@ -85,15 +85,20 @@
 
 #define CW_CHESSBOARD_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), CW_TYPE_CHESSBOARD, CwChessboardPrivate))
 
+// G_DEFINE_TYPE macro will creates :
+// cw_chessboard_init(), cw_chessboard_class_init() declarations
+// cw_chessboard_get_type() implementation
 G_DEFINE_TYPE(CwChessboard, cw_chessboard, GTK_TYPE_DRAWING_AREA);
 
-static void cw_chessboard_destroy(GtkObject* object);
+static void cw_chessboard_destroy(GtkWidget* object);
 static void cw_chessboard_finalize(GObject* object);
 static void cw_chessboard_realize(GtkWidget* widget);
 static void cw_chessboard_unrealize(GtkWidget* widget);
 static void cw_chessboard_size_request(GtkWidget* widget, GtkRequisition* requisition);
+static void cw_chessboard_get_preferred_width(GtkWidget *widget, gint *minimal_width, gint *natural_width);
+static void cw_chessboard_get_preferred_height(GtkWidget *widget, gint *minimal_height, gint *natural_height);
 static void cw_chessboard_size_allocate(GtkWidget* widget, GtkAllocation* allocation);
-static gboolean cw_chessboard_expose(GtkWidget* chessboard, GdkEventExpose* event);
+static gboolean cw_chessboard_draw(GtkWidget *widget, cairo_t *cr);
 static gboolean cw_chessboard_motion_notify(GtkWidget* chessboard, GdkEventMotion* event);
 static gboolean cw_chessboard_default_motion_notify(GtkWidget* chessboard, GdkEventMotion* event);
 
@@ -258,14 +263,14 @@ struct _CwChessboardPrivate
   gint bottom_right_pixmap_y;		// The y offset of the bottom-right corner of the pixmap.
   gint pixmap_top_left_a8_x;		// The x offset of the top-left of square a8, in pixmap coordinates.
   gint pixmap_top_left_a8_y;		// The y offset of the top-left of square a8, in pixmap coordinates.
-  GdkRegion* chessboard_region;		// The rectangular region where the chessboard resides.
+  cairo_region_t* chessboard_region;	// The rectangular region where the chessboard resides.
   gint marker_thickness_px;		// Thickness of the markers.
   gint cursor_thickness_px;		// Thickness of the cursor.
   gint cursor_col;			// Current cursor column.
   gint cursor_row;			// Current cursor row.
 
   // Buffers and caches.
-  GdkPixmap* pixmap;			// X server side drawing buffer.
+  cairo_surface_t* pixmap;		// X server side drawing buffer.
   cairo_t* cr;				// Corresponding Cairo context.
   SquareCache piece_pixmap[12];		// 12 images using piece_buffer.
   cairo_surface_t* hud_layer_surface[number_of_hud_layers];	// The HUD layers.
@@ -347,10 +352,11 @@ static inline gboolean is_inside_board(gint col, gint row)
 }
 
 // One-time initialization of the "class" of CwChessboard.
+// Called from cw_chessboard_get_type()
 static void cw_chessboard_class_init(CwChessboardClass* chessboard_class)
 {
   GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(chessboard_class);
-  GtkObjectClass *object_class = GTK_OBJECT_CLASS(widget_class);
+  GtkWidgetClass *object_class = GTK_WIDGET_CLASS(widget_class);
   GObjectClass* gobject_class = G_OBJECT_CLASS(object_class);
 
   g_type_class_add_private(object_class, sizeof(CwChessboardPrivate));
@@ -359,12 +365,22 @@ static void cw_chessboard_class_init(CwChessboardClass* chessboard_class)
 
   object_class->destroy = cw_chessboard_destroy;
 
-  widget_class->expose_event = cw_chessboard_expose;
+  // Signal to handle redrawing the contents of the widget
+  widget_class->draw = cw_chessboard_draw;
+  
+  // Signal emitted when the pointer moves over the widget’s GdkWindow.
   widget_class->motion_notify_event = cw_chessboard_default_motion_notify;
 
+  // signal to take any necessary actions when the widget is instantiated on a particular display. 
+  // (Create GDK resources in response to this signal.)
   widget_class->realize = cw_chessboard_realize;
-  widget_class->size_request = cw_chessboard_size_request;
+
+  widget_class->get_preferred_width = cw_chessboard_get_preferred_width;
+  widget_class->get_preferred_height = cw_chessboard_get_preferred_height;
+
+  // signal to take any necessary actions when the widget changes size.
   widget_class->size_allocate = cw_chessboard_size_allocate;
+
   widget_class->unrealize = cw_chessboard_unrealize;
 
   chessboard_class->calc_board_border_width = cw_chessboard_default_calc_board_border_width;
@@ -382,19 +398,20 @@ static void cw_chessboard_class_init(CwChessboardClass* chessboard_class)
   chessboard_class->cursor_entered_square = NULL;
 }
 
-static void cw_chessboard_destroy(GtkObject* object)
+static void cw_chessboard_destroy(GtkWidget* object)
 {
   Dout(dc::cwchessboardwidget, "Calling cw_chessboard_destroy(" << object << ")");
-  GTK_OBJECT_CLASS(cw_chessboard_parent_class)->destroy(object);
+  GTK_WIDGET_CLASS(cw_chessboard_parent_class)->destroy(object);
 }
 
 // Initialization of CwChessboard instances.
+// Called from cw_chessboard_get_type()
 static void cw_chessboard_init(CwChessboard* chessboard)
 {
   Dout(dc::cwchessboardwidget, "Calling cw_chessboard_init(" << chessboard << ")");
 
   CwChessboardPrivate* priv = CW_CHESSBOARD_GET_PRIVATE(chessboard);
-  GdkColormap* colormap = gtk_widget_get_colormap(GTK_WIDGET(chessboard));
+  // GdkColormap* colormap = gtk_widget_get_colormap(GTK_WIDGET(chessboard));
 
   // Initialize local pointer to private struct for faster access.
   chessboard->priv = priv;
@@ -485,20 +502,24 @@ static void cw_chessboard_init(CwChessboard* chessboard)
     dark_square_color.red = (gushort)((1.0 - x) * dark_square_red);
     dark_square_color.green = (gushort)((1.0 - x) * dark_square_green);
     dark_square_color.blue = (gushort)((1.0 - x) * dark_square_blue);
+    /*
     if (!gdk_colormap_alloc_color(colormap, &dark_square_color, FALSE, TRUE))
       DoutFatal(dc::fatal, "gdk_colormap_alloc_color failed to allocate dark_square_color (" <<
           dark_square_color.red << ", " <<
 	  dark_square_color.green << ", " <<
 	  dark_square_color.blue << ")");
+    */
 
     light_square_color.red = light_square_red + (gushort)(x * (65535 - light_square_red));
     light_square_color.green = light_square_green + (gushort)(x * (65535 - light_square_green));
     light_square_color.blue = light_square_blue + (gushort)(x * (65535 - light_square_blue));
+    /*
     if (!gdk_colormap_alloc_color(colormap, &light_square_color, FALSE, TRUE))
       DoutFatal(dc::fatal, "gdk_colormap_alloc_color failed to allocate light_square_color (" <<
           light_square_color.red << ", " <<
 	  light_square_color.green << ", " <<
 	  light_square_color.blue << ")");
+    */
 
     if (dark_square_color.red != light_square_color.red ||
         dark_square_color.green != light_square_color.green ||
@@ -556,25 +577,25 @@ static void cw_chessboard_finalize(GObject* object)
 
 static void invalidate_border(CwChessboard* chessboard)
 {
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
   {
     CwChessboardPrivate* priv = chessboard->priv;
-    GdkWindow* window = GTK_WIDGET(chessboard)->window;
-    GdkRectangle pixmap_rect;
+    GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(chessboard));
+    cairo_rectangle_int_t pixmap_rect;
     pixmap_rect.x = priv->top_left_pixmap_x;
     pixmap_rect.y = priv->top_left_pixmap_y;
     pixmap_rect.width = priv->bottom_right_pixmap_x - priv->top_left_pixmap_x;
     pixmap_rect.height = priv->bottom_right_pixmap_y - priv->top_left_pixmap_y;
-    GdkRegion* border_region = gdk_region_rectangle(&pixmap_rect);
-    gdk_region_subtract(border_region, priv->chessboard_region);
+    cairo_region_t* border_region = cairo_region_create_rectangle(&pixmap_rect);
+    cairo_region_subtract(border_region, priv->chessboard_region);
     gdk_window_invalidate_region(window, border_region, FALSE);
-    gdk_region_destroy(border_region);
+    cairo_region_destroy(border_region);
   }
 }
 
 static void invalidate_turn_indicators(CwChessboard* chessboard)
 {
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
   {
     CwChessboardPrivate* priv = chessboard->priv;
 
@@ -586,43 +607,43 @@ static void invalidate_turn_indicators(CwChessboard* chessboard)
     double const factor = 0.085786;       // (1/sqrt(2) − 0.5)/(1 + sqrt(2)).
     int const dx = (int)ceil((edge_width + 1) * factor);
 
-    GdkRectangle top_indicator_rect, bottom_indicator_rect;
+    cairo_rectangle_int_t top_indicator_rect, bottom_indicator_rect;
     top_indicator_rect.x = priv->top_left_pixmap_x + priv->pixmap_top_left_a8_x + side + 1 - dx;
     top_indicator_rect.y = priv->top_left_pixmap_y + priv->pixmap_top_left_a8_y - 1 - edge_width;
     top_indicator_rect.width = edge_width + dx;
     top_indicator_rect.height = edge_width;
-    GdkRegion* indicator_region = gdk_region_rectangle(&top_indicator_rect);
+    cairo_region_t* indicator_region = cairo_region_create_rectangle(&top_indicator_rect);
     bottom_indicator_rect.x = top_indicator_rect.x;
     bottom_indicator_rect.y = top_indicator_rect.y + edge_width + side + 2;
     bottom_indicator_rect.width = edge_width + dx;
     bottom_indicator_rect.height = edge_width;
-    gdk_region_union_with_rect(indicator_region, &bottom_indicator_rect);
+    cairo_region_union_rectangle(indicator_region, &bottom_indicator_rect);
     top_indicator_rect.x += dx;
     top_indicator_rect.y += edge_width;
     top_indicator_rect.width = edge_width;
     top_indicator_rect.height = dx;
-    gdk_region_union_with_rect(indicator_region, &top_indicator_rect);
+    cairo_region_union_rectangle(indicator_region, &top_indicator_rect);
     bottom_indicator_rect.x += dx;
     bottom_indicator_rect.y -= dx;
     bottom_indicator_rect.width = edge_width;
     bottom_indicator_rect.height = dx;
-    gdk_region_union_with_rect(indicator_region, &bottom_indicator_rect);
-    gdk_window_invalidate_region(GTK_WIDGET(chessboard)->window, indicator_region, FALSE);
-    gdk_region_destroy(indicator_region);
+    cairo_region_union_rectangle(indicator_region, &bottom_indicator_rect);
+    gdk_window_invalidate_region(gtk_widget_get_window(GTK_WIDGET(chessboard)), indicator_region, FALSE);
+    cairo_region_destroy(indicator_region);
   }
 }
 
 #if 0	// Not currently used anywhere.
 static void invalidate_background(CwChessboard* chessboard)
 {
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
   {
     CwChessboardPrivate* priv = chessboard->priv;
-    GdkWindow* window = GTK_WIDGET(chessboard)->window;
-    GdkRegion* background_region = gdk_drawable_get_clip_region(window);
-    gdk_region_subtract(background_region, priv->chessboard_region);
+    GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(chessboard));
+    cairo_region_t* background_region = gdk_drawable_get_clip_region(window);
+    cairo_region_subtract(background_region, priv->chessboard_region);
     gdk_window_invalidate_region(window, background_region, FALSE);
-    gdk_region_destroy(background_region);
+    cairo_region_destroy(background_region);
     priv->redraw_background = TRUE;
   }
 }
@@ -636,13 +657,13 @@ static void invalidate_square(CwChessboard* chessboard, gint col, gint row)
   // No need to call gdk_window_invalidate_rect again when need_redraw_invalidated is already set.
   if (!(priv->need_redraw_invalidated & redraw_mask))
   {
-    if (GTK_WIDGET_REALIZED(chessboard))
+    if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     {
-      GdkRectangle rect;
+      cairo_rectangle_int_t rect;
       rect.width = priv->sside;
       rect.height = priv->sside;
       cw_chessboard_colrow2xy(chessboard, col, row, &rect.x, &rect.y);
-      gdk_window_invalidate_rect(GTK_WIDGET(chessboard)->window, &rect, FALSE);
+      gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(chessboard)), &rect, FALSE);
       priv->need_redraw_invalidated |= redraw_mask;
     }
     else
@@ -653,9 +674,9 @@ static void invalidate_square(CwChessboard* chessboard, gint col, gint row)
 static void invalidate_board(CwChessboard* chessboard)
 {
   CwChessboardPrivate* priv = chessboard->priv;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
   {
-    gdk_window_invalidate_region(GTK_WIDGET(chessboard)->window, priv->chessboard_region, FALSE);
+    gdk_window_invalidate_region(gtk_widget_get_window(GTK_WIDGET(chessboard)), priv->chessboard_region, FALSE);
     priv->need_redraw_invalidated = (guint64)-1;
   }
   else
@@ -711,7 +732,11 @@ static void update_cursor_position(CwChessboard* chessboard, gdouble x, gdouble 
   {
     // Make sure we'll get more motion events.
     Dout(dc::cwchessboardwidget, "Calling gdk_window_get_pointer()");
-    gdk_window_get_pointer(GTK_WIDGET(chessboard)->window, NULL, NULL, NULL);
+    GdkDevice *device;
+    GdkWindow *win;
+    win = gtk_widget_get_window(GTK_WIDGET(chessboard));
+    device = gdk_device_manager_get_client_pointer(gdk_display_get_device_manager(gtk_widget_get_display(GTK_WIDGET(chessboard))));
+    gdk_window_get_device_position (win, device, NULL, NULL, NULL);
   }
 }
 
@@ -879,7 +904,7 @@ void cw_chessboard_default_draw_turn_indicator(CwChessboard* chessboard, gboolea
   cairo_restore(cr);
 }
 
-// This function should only be called from cw_chessboard_expose.
+// This function should only be called from cw_chessboard_draw.
 // Call invalidate_square to redraw a square from elsewhere.
 static void redraw_square(CwChessboard* chessboard, gint index)
 {
@@ -1025,8 +1050,11 @@ static void redraw_pixmap(GtkWidget* widget)
   CwChessboard* chessboard = CW_CHESSBOARD(widget);
   CwChessboardPrivate* priv = chessboard->priv;
 
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(GTK_WIDGET(widget), &allocation);
+
   // Calculate the size of the squares.
-  gint const max_total_side = MIN(widget->allocation.width, widget->allocation.height);
+  gint const max_total_side = MIN(allocation.width, allocation.height);
 
   // First, assume we have no border.
   gint sside = MAX(min_sside, max_total_side / squares);
@@ -1056,38 +1084,39 @@ static void redraw_pixmap(GtkWidget* widget)
   // Calculate the size of the pixmap. Include areas outside the border if small enough.
   gint pixmap_width = total_side;
   gint pixmap_height = total_side;
-  if (widget->allocation.width < widget->allocation.height)
-    pixmap_width = widget->allocation.width;
+
+  if (allocation.width < allocation.height)
+    pixmap_width = allocation.width;
   else
-    pixmap_height = widget->allocation.height;
+    pixmap_height = allocation.height;
 
   // Remember old size of pixmap.
   gint old_pixmap_width = priv->bottom_right_pixmap_x - priv->top_left_pixmap_x;
   gint old_pixmap_height = priv->bottom_right_pixmap_y - priv->top_left_pixmap_y;
   // Calculate the offsets of the pixmap corners.
-  priv->top_left_pixmap_x = ((widget->allocation.width - pixmap_width) & ~1) / 2;
-  priv->top_left_pixmap_y = ((widget->allocation.height - pixmap_height) & ~1) / 2;
+  priv->top_left_pixmap_x = ((allocation.width - pixmap_width) & ~1) / 2;
+  priv->top_left_pixmap_y = ((allocation.height - pixmap_height) & ~1) / 2;
   priv->bottom_right_pixmap_x = priv->top_left_pixmap_x + pixmap_width;
   priv->bottom_right_pixmap_y = priv->top_left_pixmap_y + pixmap_height;
   g_assert(priv->top_left_pixmap_x == 0 || priv->top_left_pixmap_y == 0);
 
   // Calculate the offset of the top-left of square a1.
-  *(gint*)(&chessboard->top_left_a1_x) = ((widget->allocation.width - side) & ~1) / 2;
-  *(gint*)(&chessboard->top_left_a1_y) = ((widget->allocation.height - side) & ~1) / 2 + side - sside;
+  *(gint*)(&chessboard->top_left_a1_x) = ((allocation.width - side) & ~1) / 2;
+  *(gint*)(&chessboard->top_left_a1_y) = ((allocation.height - side) & ~1) / 2 + side - sside;
 
   // Calculate the offset of the top-left of square a8, relative to the top-left of the pixmap.
   priv->pixmap_top_left_a8_x = chessboard->top_left_a1_x - priv->top_left_pixmap_x;
   priv->pixmap_top_left_a8_y = chessboard->top_left_a1_y + sside - side - priv->top_left_pixmap_y;
 
   // Set the rectangular region where the chessboard resides.
-  GdkRectangle rect;
+  cairo_rectangle_int_t rect;
   rect.x = priv->top_left_pixmap_x + priv->pixmap_top_left_a8_x;
   rect.y = priv->top_left_pixmap_y + priv->pixmap_top_left_a8_y;
   rect.width = squares * sside;
   rect.height = squares * sside;
   if (priv->chessboard_region)
-    gdk_region_destroy(priv->chessboard_region);
-  priv->chessboard_region = gdk_region_rectangle(&rect);
+    cairo_region_destroy(priv->chessboard_region);
+  priv->chessboard_region = cairo_region_create_rectangle(&rect);
 
   Dout(dc::cwchessboardwidget, "widget size is (" << widget->allocation.width << ", " << widget->allocation.height << ")");
   Dout(dc::cwchessboardwidget, "border width is " << priv->border_width <<
@@ -1099,7 +1128,12 @@ static void redraw_pixmap(GtkWidget* widget)
   Dout(dc::cwchessboardwidget, "    a1 at (" << chessboard->top_left_a1_x << ", " << chessboard->top_left_a1_y << ")");
 
   // Invalidate everything.
-  gdk_window_invalidate_rect(widget->window, &widget->allocation, FALSE);
+  GdkRectangle grect;
+  grect.x = allocation.x;
+  grect.y = allocation.y;
+  grect.width = allocation.width;
+  grect.height = allocation.height;
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(widget)), &grect, FALSE);
   priv->need_redraw_invalidated = (guint64)-1;
 
   if (old_pixmap_width == pixmap_width && old_pixmap_height == pixmap_height)
@@ -1111,10 +1145,10 @@ static void redraw_pixmap(GtkWidget* widget)
     g_object_unref(priv->pixmap);
 
   // Allocate a pixmap for the board including the border.
-  priv->pixmap = gdk_pixmap_new(widget->window, pixmap_width, pixmap_height, -1);
+  priv->pixmap = cairo_image_surface_create(CAIRO_FORMAT_RGB24, pixmap_width, pixmap_height);
 
   // (Re)create cairo context for the new pixmap.
-  priv->cr = gdk_cairo_create(priv->pixmap);
+  priv->cr = cairo_create(priv->pixmap);
 
   // If the resize even changed the side of the squares then we have to redraw
   // the cached pieces and the HUD layer cache. Initially priv->sside is set to
@@ -1163,15 +1197,38 @@ static void cw_chessboard_size_request(GtkWidget* widget, GtkRequisition* requis
   requisition->width = requisition->height = squares * min_sside + min_border_width;
 }
 
+static void cw_chessboard_get_preferred_width(GtkWidget *widget, gint *minimal_width, gint *natural_width)
+{
+  GtkRequisition requisition;
+  cw_chessboard_size_request(widget, &requisition);
+  *minimal_width = *natural_width = requisition.width;
+  g_debug("cw_chessboard_get_preferred_width() -> width : %u", requisition.width);
+}
+
+static void cw_chessboard_get_preferred_height(GtkWidget *widget, gint *minimal_height, gint *natural_height)
+{
+  GtkRequisition requisition;
+  cw_chessboard_size_request(widget, &requisition);
+  *minimal_height = *natural_height = requisition.height;
+  g_debug("cw_chessboard_get_preferred_height() -> height : %u", requisition.height);
+}
+
 static void cw_chessboard_size_allocate(GtkWidget* widget, GtkAllocation* allocation)
 {
   Dout(dc::cwchessboardwidget, "Calling cw_chessboard_size_allocate(" << widget << ", " << allocation << ")");
-  widget->allocation = *allocation;
-  if (GTK_WIDGET_REALIZED(widget))
+  
+  // Call parent::size_allocate() is mendatory to render cw_chessboard_draw
+  GTK_WIDGET_CLASS(cw_chessboard_parent_class)->size_allocate(widget, allocation);
+
+  if (gtk_widget_get_realized(GTK_WIDGET(widget)))
   {
-    gdk_window_move_resize(widget->window,
+    /*
+    // This is already impemented in parent class
+    gdk_window_move_resize(gtk_widget_get_window(GTK_WIDGET(widget)),
         allocation->x, allocation->y,
         allocation->width, allocation->height);
+    */
+     
     redraw_pixmap(widget);
   }
   CwChessboard* chessboard = CW_CHESSBOARD(widget);
@@ -1184,8 +1241,8 @@ static void cw_chessboard_realize(GtkWidget* widget)
   CwChessboard* chessboard = CW_CHESSBOARD(widget);
   GTK_WIDGET_CLASS(cw_chessboard_parent_class)->realize(widget);
   redraw_pixmap(widget);
-  //gtk_style_set_background(widget->style, widget->window, GTK_STATE_NORMAL);
-  gdk_window_set_background(widget->window, &chessboard->priv->widget_background_color);
+  //gtk_style_set_background(widget->style, gtk_widget_get_window(GTK_WIDGET(widget)), GTK_STATE_NORMAL);
+  gdk_window_set_background(gtk_widget_get_window(GTK_WIDGET(widget)), &chessboard->priv->widget_background_color);
 }
 
 static void cw_chessboard_unrealize(GtkWidget* widget)
@@ -1202,7 +1259,7 @@ static void cw_chessboard_unrealize(GtkWidget* widget)
   if (priv->hatching_pixmap.surface)
     cairo_surface_destroy(priv->hatching_pixmap.surface);
   priv->hatching_pixmap.surface = NULL;
-  gdk_region_destroy(priv->chessboard_region);
+  cairo_region_destroy(priv->chessboard_region);
   priv->chessboard_region = NULL;
   for (guint hud = 0; hud < G_N_ELEMENTS(priv->hud_layer_surface); ++hud)
     cairo_surface_destroy(priv->hud_layer_surface[hud]);
@@ -1221,13 +1278,25 @@ static void cw_chessboard_unrealize(GtkWidget* widget)
 
 // This function is called whenever (a certain region of) the chessboard needs
 // to be redrawn, for whatever reason.
-static gboolean cw_chessboard_expose(GtkWidget* widget, GdkEventExpose* event)
+static gboolean cw_chessboard_draw(GtkWidget *widget, cairo_t *cr)
 {
   Dout(dc::cwchessboardwidget, "Calling cw_chessboard_expose(" << widget << ", " << event << ")");
 
   CwChessboard* chessboard = CW_CHESSBOARD(widget);
   CwChessboardPrivate* priv = chessboard->priv;
-  GdkRegion* region = event->region;
+  // cairo_region_t* region = event->region;
+
+  guint widget_width, widget_height;
+
+  widget_width = gtk_widget_get_allocated_width(widget);
+  widget_height = gtk_widget_get_allocated_height(widget);
+  
+  cairo_rectangle_int_t tmp_rect;
+  tmp_rect.x = priv->top_left_pixmap_x;
+  tmp_rect.y = priv->top_left_pixmap_y;
+  tmp_rect.width = widget_width;
+  tmp_rect.height = widget_height;
+  cairo_region_t* region = cairo_region_create_rectangle(&tmp_rect);
 
 #if CW_CHESSBOARD_EXPOSE_DEBUG
   gdk_window_clear(widget->window);
@@ -1286,8 +1355,8 @@ static gboolean cw_chessboard_expose(GtkWidget* widget, GdkEventExpose* event)
   // This default is false, which is the case when the board is only updated.
   gboolean region_extends_outside_pixmap = FALSE;
   // However, if we resized -- or another window moved over the widget -- it could be true.
-  GdkRectangle clipbox;
-  gdk_region_get_clipbox(region, &clipbox);
+  cairo_rectangle_int_t clipbox;
+  cairo_region_get_extents(region, &clipbox);
   if (G_UNLIKELY(clipbox.y < priv->top_left_pixmap_y))
     region_extends_outside_pixmap = vertical;
   if (G_UNLIKELY(clipbox.y + clipbox.height > priv->bottom_right_pixmap_y))
@@ -1298,23 +1367,31 @@ static gboolean cw_chessboard_expose(GtkWidget* widget, GdkEventExpose* event)
     region_extends_outside_pixmap = !vertical;
   if (G_UNLIKELY(region_extends_outside_pixmap))
   {
-    GdkRectangle pixmap_rect;
+    cairo_rectangle_int_t pixmap_rect;
     pixmap_rect.x = priv->top_left_pixmap_x;
     pixmap_rect.y = priv->top_left_pixmap_y;
     pixmap_rect.width = priv->bottom_right_pixmap_x - priv->top_left_pixmap_x;
     pixmap_rect.height = priv->bottom_right_pixmap_y - priv->top_left_pixmap_y;
-    GdkRegion* pixmap_region = gdk_region_rectangle(&pixmap_rect);
+    cairo_region_t* pixmap_region = cairo_region_create_rectangle(&pixmap_rect);
     if (CW_CHESSBOARD_EXPOSE_ALWAYS_CLEAR_BACKGROUND || priv->redraw_background)
     {
       // If the widget was resized, there might be trash outside the pixmap. Erase that too.
-      GdkRegion* outside_pixmap_region = gdk_region_copy(region);
-      gdk_region_subtract(outside_pixmap_region, pixmap_region);
-      GdkRectangle* outside_areas;
-      gint n_outside_areas;
-      gdk_region_get_rectangles(outside_pixmap_region, &outside_areas, &n_outside_areas);
-      GdkRectangle const* outside_rect = outside_areas;
-      for (int i = 0; i < n_outside_areas; ++i, ++outside_rect)
-	gdk_window_clear_area(widget->window, outside_rect->x, outside_rect->y, outside_rect->width, outside_rect->height);
+      cairo_region_t* outside_pixmap_region = cairo_region_copy(region);
+      cairo_region_subtract(outside_pixmap_region, pixmap_region);
+
+      /*
+      cairo_rectangle_int_t outside_areas;
+      int n_outside_areas = cairo_region_num_rectangles(outside_pixmap_region);
+      
+      // cairo_rectangle_int_t const* outside_rect = outside_areas;
+      for (int i = 0; i < n_outside_areas; ++i) {
+          cairo_rectangle_int_t outside_rect;
+          cairo_region_get_rectangle(outside_pixmap_region, i, &outside_rect);
+          gdk_window_clear_area(gtk_widget_get_window(GTK_WIDGET(widget)), outside_rect.x, outside_rect.y, outside_rect.width, outside_rect.height);
+          // gdk_window_clear_area(gtk_widget_get_window(GTK_WIDGET(widget)), outside_rect->x, outside_rect->y, outside_rect->width, outside_rect->height);
+      }
+      */
+
 #if CW_CHESSBOARD_EXPOSE_DEBUG
       // Draw a green rectangle around updated areas.
       GdkGC* debug_gc = gdk_gc_new(priv->pixmap);
@@ -1327,14 +1404,14 @@ static gboolean cw_chessboard_expose(GtkWidget* widget, GdkEventExpose* event)
 	    outside_rect->x, outside_rect->y, outside_rect->width - 1, outside_rect->height - 1);
       g_object_unref(debug_gc);
 #endif
-      gdk_region_destroy(outside_pixmap_region);
+      cairo_region_destroy(outside_pixmap_region);
       priv->redraw_background = FALSE;
     }
-    gdk_region_intersect(region, pixmap_region);
-    gdk_region_destroy(pixmap_region);
+    cairo_region_intersect(region, pixmap_region);
+    cairo_region_destroy(pixmap_region);
   }
 
-  cairo_t* dest = gdk_cairo_create(widget->window);
+  cairo_t* dest = gdk_cairo_create(gtk_widget_get_window(GTK_WIDGET(widget)));
 #if !CW_CHESSBOARD_FLOATING_PIECE_DOUBLE_BUFFER && !CW_CHESSBOARD_FLOATING_PIECE_INVALIDATE_TARGET
   if (priv->number_of_floating_pieces)
     cairo_save(dest);
@@ -1383,7 +1460,11 @@ static gboolean cw_chessboard_expose(GtkWidget* widget, GdkEventExpose* event)
   {
     // Call this function so that we'll get the next pointer motion hint.
     Dout(dc::cwchessboardwidget, "Calling gdk_window_get_pointer()");
-    gdk_window_get_pointer(GTK_WIDGET(chessboard)->window, NULL, NULL, NULL);
+    GdkDevice *device;
+    GdkWindow *win;
+    win = gtk_widget_get_window(GTK_WIDGET(chessboard));
+    device = gdk_device_manager_get_client_pointer(gdk_display_get_device_manager(gtk_widget_get_display(GTK_WIDGET(chessboard))));
+    gdk_window_get_device_position (win, device, NULL, NULL, NULL);
   }
 #if 0
   static int benchmark = 0;
@@ -1475,9 +1556,9 @@ void cw_chessboard_default_draw_hud_layer(CwChessboard* chessboard, cairo_t* cr,
     }
 }
 
-static GdkRegion* convert_mask2region(guint64 mask, gint x, gint y, gint sside, gboolean flip_board)
+static cairo_region_t* convert_mask2region(guint64 mask, gint x, gint y, gint sside, gboolean flip_board)
 {
-  GdkRegion* region = gdk_region_new();
+  cairo_region_t* region = cairo_region_create();
   guint64 row_mask = (guint64)0xff << 56;
   for (gint row = 7; row >= 0; --row, row_mask >>= 8)
   {
@@ -1501,12 +1582,12 @@ static GdkRegion* convert_mask2region(guint64 mask, gint x, gint y, gint sside, 
 	  ++col_end;
 	  col_mask <<= 1;
 	}
-	GdkRectangle rect;
+	cairo_rectangle_int_t rect;
         rect.x = x + (flip_board ? 8 - col_end : col_start) * sside;
 	rect.y = y + (flip_board ? row : 7 - row) * sside;
 	rect.width = (col_end - col_start) * sside;
         rect.height = sside;
-	gdk_region_union_with_rect(region, &rect);
+	cairo_region_union_rectangle(region, &rect);
 	col_start = col_end;
       }
       while(col_end !=8);
@@ -1550,9 +1631,9 @@ static void redraw_hud_layer(CwChessboard* chessboard, guint hud)
     CW_CHESSBOARD_GET_CLASS(chessboard)->draw_hud_layer(chessboard, cr, sside, hud);
   }
 
-  GdkRegion* need_redraw_region = convert_mask2region(priv->hud_need_redraw[hud], 0, 0, priv->sside, priv->flip_board);
+  cairo_region_t* need_redraw_region = convert_mask2region(priv->hud_need_redraw[hud], 0, 0, priv->sside, priv->flip_board);
   gdk_cairo_region(cr, need_redraw_region);
-  gdk_region_destroy(need_redraw_region);
+  cairo_region_destroy(need_redraw_region);
   cairo_clip(cr);
 
   for (guint i = 0; i < priv->arrows->len; ++i)
@@ -1568,9 +1649,9 @@ static void redraw_hud_layer(CwChessboard* chessboard, guint hud)
       if (has_colliding_content)
       {
         cairo_save(cr);
-	GdkRegion* clip_region = convert_mask2region(arrow->has_content[hud], 0, 0, priv->sside, priv->flip_board);
+	cairo_region_t* clip_region = convert_mask2region(arrow->has_content[hud], 0, 0, priv->sside, priv->flip_board);
 	gdk_cairo_region(cr, clip_region);
-	gdk_region_destroy(clip_region);
+	cairo_region_destroy(clip_region);
 	cairo_clip(cr);
       }
       gdouble length = sqrt((arrow->end_col - arrow->begin_col) * (arrow->end_col - arrow->begin_col) +
@@ -1765,7 +1846,7 @@ void cw_chessboard_set_draw_border(CwChessboard* chessboard, gboolean draw)
   if (chessboard->priv->draw_border != draw)
   {
     chessboard->priv->draw_border = draw;
-    if (GTK_WIDGET_REALIZED(chessboard))
+    if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
       redraw_pixmap(GTK_WIDGET(chessboard));
   }
 }
@@ -1780,7 +1861,7 @@ void cw_chessboard_set_flip_board(CwChessboard* chessboard, gboolean flip)
   if (chessboard->priv->flip_board != flip)
   {
     *(gboolean*)(&chessboard->flip_board) = chessboard->priv->flip_board = flip;
-    if (GTK_WIDGET_REALIZED(chessboard))
+    if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     {
       redraw_border(chessboard);
       for (guint hud = 0; hud < G_N_ELEMENTS(chessboard->priv->hud_need_redraw); ++hud)
@@ -1804,7 +1885,7 @@ void cw_chessboard_set_draw_turn_indicators(CwChessboard* chessboard, gboolean d
   if (priv->draw_turn_indicators != draw)
   {
     priv->draw_turn_indicators = draw;
-    if (GTK_WIDGET_REALIZED(chessboard) && priv->border_width)
+    if (gtk_widget_get_realized(GTK_WIDGET(chessboard)) && priv->border_width)
     {
       CW_CHESSBOARD_GET_CLASS(chessboard)->draw_turn_indicator(chessboard, priv->active_turn_indicator, priv->draw_turn_indicators);
       invalidate_turn_indicators(chessboard);
@@ -1823,7 +1904,7 @@ void cw_chessboard_set_active_turn_indicator(CwChessboard* chessboard, gboolean 
   if (priv->active_turn_indicator != white)
   {
     priv->active_turn_indicator = white;
-    if (GTK_WIDGET_REALIZED(chessboard) && priv->border_width && priv->draw_turn_indicators)
+    if (gtk_widget_get_realized(GTK_WIDGET(chessboard)) && priv->border_width && priv->draw_turn_indicators)
     {
       CW_CHESSBOARD_GET_CLASS(chessboard)->draw_turn_indicator(chessboard, TRUE, white);
       CW_CHESSBOARD_GET_CLASS(chessboard)->draw_turn_indicator(chessboard, FALSE, !white);
@@ -1877,7 +1958,7 @@ void cw_chessboard_set_border_color(CwChessboard* chessboard, GdkColor const* co
   chessboard->priv->board_border_color.red = color->red / 65535.0;
   chessboard->priv->board_border_color.green = color->green / 65535.0;
   chessboard->priv->board_border_color.blue = color->blue / 65535.0;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     redraw_border(chessboard);
 }
 
@@ -1895,7 +1976,7 @@ void cw_chessboard_set_white_fill_color(CwChessboard* chessboard, GdkColor const
   chessboard->priv->white_piece_fill_color.red = color->red / 65535.0;
   chessboard->priv->white_piece_fill_color.green = color->green / 65535.0;
   chessboard->priv->white_piece_fill_color.blue = color->blue / 65535.0;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     redraw_pieces(chessboard);
 }
 
@@ -1913,7 +1994,7 @@ void cw_chessboard_set_white_line_color(CwChessboard* chessboard, GdkColor const
   chessboard->priv->white_piece_line_color.red = color->red / 65535.0;
   chessboard->priv->white_piece_line_color.green = color->green / 65535.0;
   chessboard->priv->white_piece_line_color.blue = color->blue / 65535.0;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     redraw_pieces(chessboard);
 }
 
@@ -1931,7 +2012,7 @@ void cw_chessboard_set_black_fill_color(CwChessboard* chessboard, GdkColor const
   chessboard->priv->black_piece_fill_color.red = color->red / 65535.0;
   chessboard->priv->black_piece_fill_color.green = color->green / 65535.0;
   chessboard->priv->black_piece_fill_color.blue = color->blue / 65535.0;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     redraw_pieces(chessboard);
 }
 
@@ -1949,7 +2030,7 @@ void cw_chessboard_set_black_line_color(CwChessboard* chessboard, GdkColor const
   chessboard->priv->black_piece_line_color.red = color->red / 65535.0;
   chessboard->priv->black_piece_line_color.green = color->green / 65535.0;
   chessboard->priv->black_piece_line_color.blue = color->blue / 65535.0;
-  if (GTK_WIDGET_REALIZED(chessboard))
+  if (gtk_widget_get_realized(GTK_WIDGET(chessboard)))
     redraw_pieces(chessboard);
 }
 
@@ -2001,7 +2082,12 @@ void cw_chessboard_show_cursor(CwChessboard* chessboard)
   gint x;
   gint y;
   Dout(dc::cwchessboardwidget, "Calling gdk_window_get_pointer()");
-  gdk_window_get_pointer(widget->window, &x, &y, NULL);
+  GdkDevice *device;
+  GdkWindow *win;
+  win = gtk_widget_get_window(GTK_WIDGET(chessboard));
+  device = gdk_device_manager_get_client_pointer(gdk_display_get_device_manager(gtk_widget_get_display(GTK_WIDGET(chessboard))));
+  gdk_window_get_device_position (win, device, &x, &y, NULL);
+
   update_cursor_position(chessboard, x, y, TRUE);
 }
 
@@ -2019,7 +2105,7 @@ void cw_chessboard_move_floating_piece(CwChessboard* chessboard, gint handle, gd
 
   GtkWidget* widget = GTK_WIDGET(chessboard);
   CwChessboardPrivate* priv = chessboard->priv;
-  GdkRectangle rect;
+  cairo_rectangle_int_t rect;
 
   g_assert(handle >= 0 && (gsize)handle < G_N_ELEMENTS(priv->floating_piece));
   g_assert(!is_empty_square(priv->floating_piece[handle].code));
@@ -2032,7 +2118,7 @@ void cw_chessboard_move_floating_piece(CwChessboard* chessboard, gint handle, gd
   rect.height = priv->sside;
   rect.x = priv->floating_piece[handle].pixmap_x + priv->top_left_pixmap_x;
   rect.y = priv->floating_piece[handle].pixmap_y + priv->top_left_pixmap_y;
-  gdk_window_invalidate_rect(widget->window, &rect, FALSE);
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(widget)), &rect, FALSE);
 #if CW_CHESSBOARD_FLOATING_PIECE_DOUBLE_BUFFER
   gint col = cw_chessboard_x2col(chessboard, rect.x);
   gint row = cw_chessboard_y2row(chessboard, rect.y);
@@ -2064,11 +2150,14 @@ void cw_chessboard_move_floating_piece(CwChessboard* chessboard, gint handle, gd
     priv->need_redraw |= (redraw_mask << index);
   }
 #endif
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(GTK_WIDGET(widget), &allocation);
+
   gboolean outside_window =
       rect.x + rect.width < 0 ||
-      rect.x > widget->allocation.x ||
+      rect.x > allocation.x ||
       rect.y + rect.height < 0 ||
-      rect.y > widget->allocation.y;
+      rect.y > allocation.y;
   // Redraw background of widget if the old place of the floating piece is outside the board.
   priv->redraw_background = priv->redraw_background ||
       rect.x < priv->top_left_pixmap_x ||
@@ -2078,17 +2167,21 @@ void cw_chessboard_move_floating_piece(CwChessboard* chessboard, gint handle, gd
   rect.x = (gint)trunc(x - 0.5 * priv->sside);
   rect.y = (gint)trunc(y - 0.5 * priv->sside);
 #if CW_CHESSBOARD_FLOATING_PIECE_INVALIDATE_TARGET || CW_CHESSBOARD_FLOATING_PIECE_DOUBLE_BUFFER
-  gdk_window_invalidate_rect(widget->window, &rect, FALSE);
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(widget)), &rect, FALSE);
   outside_window = outside_window &&
       (rect.x + rect.width < 0 ||
-      rect.x > widget->allocation.x ||
+      rect.x > allocation.x ||
       rect.y + rect.height < 0 ||
-      rect.y > widget->allocation.y);
+      rect.y > allocation.y);
 #endif
   if (outside_window && priv->floating_piece[handle].pointer_device)
   {
     Dout(dc::cwchessboardwidget, "Calling gdk_window_get_pointer()");
-    gdk_window_get_pointer(widget->window, NULL, NULL, NULL);
+    GdkDevice *device;
+    GdkWindow *win;
+    win = gtk_widget_get_window(GTK_WIDGET(chessboard));
+    device = gdk_device_manager_get_client_pointer(gdk_display_get_device_manager(gtk_widget_get_display(GTK_WIDGET(chessboard))));
+    gdk_window_get_device_position (win, device, NULL, NULL, NULL);
   }
   priv->floating_piece[handle].pixmap_x = rect.x - priv->top_left_pixmap_x;
   priv->floating_piece[handle].pixmap_y = rect.y - priv->top_left_pixmap_y;
@@ -2110,7 +2203,7 @@ gint cw_chessboard_add_floating_piece(CwChessboard* chessboard, CwChessboardCode
   gint handle = 0;
   while (priv->floating_piece[handle].code != empty_square)
     ++handle;
-  GdkRectangle rect;
+  cairo_rectangle_int_t rect;
   rect.x = (gint)trunc(x - 0.5 * priv->sside);
   rect.y = (gint)trunc(y - 0.5 * priv->sside);
   priv->floating_piece[handle].code = code & piece_color_mask;
@@ -2126,12 +2219,12 @@ gint cw_chessboard_add_floating_piece(CwChessboard* chessboard, CwChessboardCode
   // See remark in cw_chessboard_move_floating_piece.
   rect.width = priv->sside;
   rect.height = priv->sside;
-  gdk_window_invalidate_rect(GTK_WIDGET(chessboard)->window, &rect, FALSE);
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(chessboard)), &rect, FALSE);
 #else
   // FIXME: schedule an expose event instead of this:
   rect.width = priv->sside;
   rect.height = priv->sside;
-  gdk_window_invalidate_rect(GTK_WIDGET(chessboard)->window, &rect, FALSE);
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(chessboard)), &rect, FALSE);
 #endif
 
   Dout(dc::cwchessboardwidget, "number_of_floating_pieces = " << priv->number_of_floating_pieces);
@@ -2145,7 +2238,7 @@ void cw_chessboard_remove_floating_piece(CwChessboard* chessboard, gint handle)
   Dout(dc::cwchessboardwidget, "Calling cw_chessboard_remove_floating_piece(" << chessboard << ", handle:" << handle << ")");
 
   CwChessboardPrivate* priv = chessboard->priv;
-  GdkRectangle rect;
+  cairo_rectangle_int_t rect;
 
   g_assert(handle >= 0 && (gsize)handle < G_N_ELEMENTS(priv->floating_piece));
   g_assert(!is_empty_square(priv->floating_piece[handle].code));
@@ -2155,7 +2248,7 @@ void cw_chessboard_remove_floating_piece(CwChessboard* chessboard, gint handle)
   rect.height = priv->sside;
   rect.x = priv->floating_piece[handle].pixmap_x + priv->top_left_pixmap_x;
   rect.y = priv->floating_piece[handle].pixmap_y + priv->top_left_pixmap_y;
-  gdk_window_invalidate_rect(GTK_WIDGET(chessboard)->window, &rect, FALSE);
+  gdk_window_invalidate_rect(gtk_widget_get_window(GTK_WIDGET(chessboard)), &rect, FALSE);
 #if CW_CHESSBOARD_FLOATING_PIECE_DOUBLE_BUFFER
   gint col = cw_chessboard_x2col(chessboard, rect.x);
   gint row = cw_chessboard_y2row(chessboard, rect.y);

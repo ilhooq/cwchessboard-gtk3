@@ -29,7 +29,7 @@
 
 #include <math.h>
 #include <glib.h>
-#include <gtk/gtkdrawingarea.h>
+#include <gtk/gtk.h>
 
 #ifdef __cplusplus
 #define CWCHESSBOARD_INLINE inline

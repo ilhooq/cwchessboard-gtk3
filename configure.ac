@@ -65,7 +65,7 @@ dnl Checks for other programs.
 AC_PROG_INSTALL
 
 dnl Detect libgtkmm
-PKG_CHECK_MODULES([gtkmm], [gtkmm-2.4 >= 2.8.0])
+PKG_CHECK_MODULES([gtkmm], [gtkmm-3.0])
 
 if test -z "$REAL_MAINTAINER_FALSE"; then
 OUTPUT_DIRECTORY=
@@ -73,7 +73,7 @@ fi
 AC_SUBST(OUTPUT_DIRECTORY)
 
 dnl Check for libraries.
-CW_LIB_LIBGTK2
+PKG_CHECK_MODULES([GTK3], [gtk+-3.0])
 
 dnl Generate sys.h.
 CW_CONFIG_FILE([src], [sys.h])
