@@ -1,4 +1,4 @@
-# Cwchessboard GTK3+ widget
+# Cwchessboard GTK3+
 
 This is the GTK3+ portage from the original [cwchessboard](http://carlowood.github.io/cwchessboard/) project written for GTK2+
 
